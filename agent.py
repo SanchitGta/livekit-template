@@ -1,6 +1,6 @@
 import os
-from dotenv import load_dotenv
 import logging
+import json
 
 from livekit import agents
 from livekit.agents import AgentSession, Agent, RoomInputOptions
@@ -14,7 +14,10 @@ from livekit.plugins import (
 # from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from livekit.plugins.turn_detector.english import EnglishModel
 
-load_dotenv(override=True)
+from utils.settings import load_settings
+
+# Load settings from settings.json
+settings = load_settings()
 
 
 # Logger setup (insert once at top of each module)
@@ -32,7 +35,8 @@ logger.setLevel(logging.INFO)
 
 class Assistant(Agent):
     def __init__(self) -> None:
-        super().__init__(instructions="You are a helpful voice AI assistant.")
+        agent_settings = settings['agent']
+        super().__init__(instructions=agent_settings['instructions'])
 
 
 async def entrypoint(ctx: agents.JobContext):
@@ -43,9 +47,13 @@ async def entrypoint(ctx: agents.JobContext):
     print("namaste_ctx: ", ctx)
 
     logger.info("Initializing AgentSession")
+    agent_settings = settings['agent']
+    stt_settings = agent_settings['stt']
+    llm_settings = agent_settings['llm']
+    
     session = AgentSession(
-        stt=deepgram.STT(model="nova-3", language="multi"),
-        llm=openai.LLM(model="gpt-4o-mini"),
+        stt=deepgram.STT(model=stt_settings['model'], language=stt_settings['language']),
+        llm=openai.LLM(model=llm_settings['model']),
         tts=deepgram.TTS(),
         vad=silero.VAD.load(),
         turn_detection=EnglishModel(),
@@ -66,7 +74,7 @@ async def entrypoint(ctx: agents.JobContext):
     await ctx.connect()
 
     await session.generate_reply(
-        instructions="Greet the user and offer your assistance."
+        instructions=agent_settings['greeting']
     )
 
 

@@ -1,0 +1,16 @@
+version: '3'
+
+services:
+  livekit-voice-chat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount settings.json so it can be modified without rebuilding
+      - ./settings.json:/app/settings.json
+    restart: unless-stopped
+    environment:
+      # Add any environment variables here if needed
+      - PYTHONUNBUFFERED=1

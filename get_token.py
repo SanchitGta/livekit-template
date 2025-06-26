@@ -1,13 +1,16 @@
 # server.py
 import os
 import uuid
+import json
 from livekit import api
 
-from dotenv import load_dotenv
-load_dotenv()
+from utils.settings import load_settings
 
 def getToken(identity, name, room):
-  token = api.AccessToken(os.getenv('LIVEKIT_API_KEY'), os.getenv('LIVEKIT_API_SECRET')) \
+  settings = load_settings()
+  livekit_settings = settings['livekit']
+  
+  token = api.AccessToken(livekit_settings['api_key'], livekit_settings['api_secret']) \
     .with_identity(identity) \
     .with_name(name) \
     .with_grants(api.VideoGrants(

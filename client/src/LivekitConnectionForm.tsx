@@ -2,40 +2,115 @@ import { useState, useEffect } from 'react';
 import { Room, ConnectionState } from 'livekit-client';
 import { RoomAudioRenderer, RoomContext } from '@livekit/components-react';
 import { Loader2, Mic, MicOff, PhoneOff } from 'lucide-react';
+import { getSettings, getToken } from './utils/settings';
 
 interface LivekitConnectionFormProps {
   onRoomReady?: (disconnectFn: () => Promise<void>) => void;
 }
 
 export default function LivekitConnectionForm({ onRoomReady }: LivekitConnectionFormProps) {
-  // Get stored values from localStorage
-  const [wsURL, setWsURL] = useState<string>(() => localStorage.getItem('livekit-wsURL') || '');
-  const [token, setToken] = useState<string>(() => localStorage.getItem('livekit-token') || '');
+  // State for connection
+  const [wsURL, setWsURL] = useState<string>('');
+  const [token, setToken] = useState<string>('');
   const [room, setRoom] = useState<Room | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [transcripts] = useState<{text: string, isFinal: boolean}[]>([]);
+  const [autoConnect, setAutoConnect] = useState<boolean>(false);
 
-  // Save values to localStorage when they change
+  // Load settings and setup auto-connect
   useEffect(() => {
-    if (wsURL) localStorage.setItem('livekit-wsURL', wsURL);
-  }, [wsURL]);
+    const loadSettings = async () => {
+      try {
+        const settings = await getSettings();
+        console.log('Loaded settings:', settings);
+        
+        setAutoConnect(settings.client.auto_connect);
+        
+        // Make sure we have a valid WebSocket URL
+        const wsUrl = settings.livekit.ws_url;
+        if (!wsUrl || !wsUrl.startsWith('wss://')) {
+          console.error('Invalid WebSocket URL in settings:', wsUrl);
+          // Don't set error yet, only log to console
+          return;
+        }
+        
+        setWsURL(wsUrl);
+        console.log('Using WebSocket URL:', wsUrl);
+        
+        // If auto-connect is enabled, fetch token and connect
+        if (settings.client.auto_connect) {
+          await fetchTokenAndConnect();
+        }
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+        // Don't set error yet, only log to console
+      }
+    };
+    
+    loadSettings();
+  }, []);
 
-  useEffect(() => {
-    if (token) localStorage.setItem('livekit-token', token);
-  }, [token]);
-
+  // Fetch token from server and connect
+  const fetchTokenAndConnect = async () => {
+    setError(null);
+    setIsConnecting(true);
+    
+    try {
+      // Validate WebSocket URL before proceeding
+      if (!wsURL || !wsURL.startsWith('wss://')) {
+        throw new Error(`Invalid WebSocket URL: ${wsURL}. URL must start with wss://`);
+      }
+      
+      // Get token from server
+      const tokenData = await getToken();
+      setToken(tokenData.token);
+      
+      // Connect with the token
+      await connectToRoom(wsURL, tokenData.token);
+    } catch (error) {
+      console.error('Failed to get token:', error);
+      setError(`Failed to get token: ${error instanceof Error ? error.message : String(error)}`);
+      setIsConnecting(false);
+    }
+  };
+  
+  // Connect with provided URL and token
   const handleConnect = async () => {
-    if (!wsURL || !token) {
-      setError('Please provide both URL and token');
+    if (!wsURL) {
+      setError('Server URL is required');
+      return;
+    }
+    
+    // If auto-connect is enabled, fetch token from server
+    if (autoConnect) {
+      await fetchTokenAndConnect();
+      return;
+    }
+    
+    // Manual connect with provided token
+    if (!token) {
+      setError('Token is required');
       return;
     }
 
     setError(null);
     setIsConnecting(true);
-
+    await connectToRoom(wsURL, token);
+  };
+  
+  // Connect to room with URL and token
+  const connectToRoom = async (url: string, tokenValue: string) => {
     try {
+      // Validate URL format
+      if (!url || !url.startsWith('wss://')) {
+        throw new Error(`Invalid WebSocket URL: ${url}. URL must start with wss://`);
+      }
+      
+      console.log('Connecting to LiveKit with URL:', url);
+      console.log('Token length:', tokenValue?.length || 0);
+      
       const newRoom = new Room();
       
       // Set up event listeners
@@ -44,11 +119,12 @@ export default function LivekitConnectionForm({ onRoomReady }: LivekitConnection
       });
 
       // Connect to room
-      await newRoom.connect(wsURL, token, {
+      await newRoom.connect(url, tokenValue, {
         autoSubscribe: true
       });
 
       setRoom(newRoom);
+      console.log('Successfully connected to room');
       
       // Call the onRoomReady callback if provided
       if (onRoomReady) {
@@ -142,31 +218,35 @@ export default function LivekitConnectionForm({ onRoomReady }: LivekitConnection
         </RoomContext.Provider>
       ) : (
         <div className="bg-white rounded-lg shadow p-6">
-          <div className="mb-4">
-            <label htmlFor="wsURL" className="block text-sm font-medium text-gray-700 mb-1">Server URL</label>
-            <input 
-              type="text" 
-              id="wsURL" 
-              value={wsURL} 
-              onChange={(e) => setWsURL(e.target.value)}
-              placeholder="Enter WebSocket URL"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
+          {!autoConnect && (
+            <>
+              <div className="mb-4">
+                <label htmlFor="wsURL" className="block text-sm font-medium text-gray-700 mb-1">Server URL</label>
+                <input 
+                  type="text" 
+                  id="wsURL" 
+                  value={wsURL} 
+                  onChange={(e) => setWsURL(e.target.value)}
+                  placeholder="Enter WebSocket URL"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              
+              <div className="mb-6">
+                <label htmlFor="token" className="block text-sm font-medium text-gray-700 mb-1">Token</label>
+                <input 
+                  type="text" 
+                  id="token" 
+                  value={token} 
+                  onChange={(e) => setToken(e.target.value)}
+                  placeholder="Enter your token"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </>
+          )}
           
-          <div className="mb-6">
-            <label htmlFor="token" className="block text-sm font-medium text-gray-700 mb-1">Token</label>
-            <input 
-              type="text" 
-              id="token" 
-              value={token} 
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Enter your token"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-          
-          {error && (
+          {error && isConnecting === false && (
             <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-md text-sm">
               {error}
             </div>
@@ -174,7 +254,7 @@ export default function LivekitConnectionForm({ onRoomReady }: LivekitConnection
           
           <button 
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleConnect}
+            onClick={autoConnect ? fetchTokenAndConnect : handleConnect}
             disabled={isConnecting}
           >
             {isConnecting ? (
@@ -182,7 +262,7 @@ export default function LivekitConnectionForm({ onRoomReady }: LivekitConnection
                 <Loader2 className="animate-spin mr-2" size={18} />
                 <span>Connecting...</span>
               </div>
-            ) : 'Connect'}
+            ) : autoConnect ? 'Connect' : 'Connect Manually'}
           </button>
         </div>
       )}
